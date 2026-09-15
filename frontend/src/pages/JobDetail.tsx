@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 
 import { api, streamJob } from '../api/client';
 import AiReasoningCard from '../components/AiReasoningCard';
@@ -28,13 +28,19 @@ import type { Job, StageInfo, StageName, TraceEvent } from '../types';
 
 export default function JobDetail() {
   const { jobId } = useParams();
-  const [job, setJob] = useState<Job | null>(null);
+  const location = useLocation();
+  const locationState = location.state as { job?: Job; replayDelayMs?: number } | null;
+  const preloadedJob = locationState?.job ?? null;
+  const replayDelayMs = locationState?.replayDelayMs ?? 0;
+
+  const [job, setJob] = useState<Job | null>(preloadedJob);
   const [stages, setStages] = useState<StageInfo[]>([]);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [selectedStage, setSelectedStage] = useState<StageName | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [streaming, setStreaming] = useState(true);
+  const [streaming, setStreaming] = useState(!preloadedJob);
   const closeRef = useRef<(() => void) | null>(null);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const handleStage = useCallback((event: TraceEvent) => {
     setEvents((previous) => {
@@ -47,6 +53,29 @@ export default function JobDetail() {
     if (!jobId) return;
 
     api.stages().then(setStages).catch(() => undefined);
+
+    // İş, laboratuvardan tamamlanmış olarak geldiyse (isteğin sonucu zaten
+    // elimizde): sunucuya tekrar sorulmaz. Sunucusuz (serverless) dağıtımda
+    // işler istekler arasında kalıcı olmayabilir, bu yüzden bu yol hem daha
+    // hızlı hem daha güvenilirdir. Aşamalar, sunum hızı ayarına göre
+    // istemci tarafında sırayla açılır; canlı akış görünümü böylece korunur.
+    if (preloadedJob && preloadedJob.id === jobId) {
+      setJob(preloadedJob);
+      const delay = replayDelayMs;
+      preloadedJob.events.forEach((event, index) => {
+        const timeout = setTimeout(() => handleStage(event), delay * index);
+        timeoutsRef.current.push(timeout);
+      });
+      const finishTimeout = setTimeout(
+        () => setStreaming(false),
+        delay * preloadedJob.events.length,
+      );
+      timeoutsRef.current.push(finishTimeout);
+      return () => {
+        timeoutsRef.current.forEach(clearTimeout);
+        timeoutsRef.current = [];
+      };
+    }
 
     api
       .job(jobId)
@@ -71,7 +100,10 @@ export default function JobDetail() {
         });
       })
       .catch((err: Error) => {
-        setError(err.message);
+        setError(
+          'Bu iş bulunamadı. Sunucusuz demo dağıtımında işler kalıcı olarak saklanmaz; ' +
+            'lütfen laboratuvardan yeniden çalıştırın. (' + err.message + ')',
+        );
         setStreaming(false);
       });
 
@@ -79,6 +111,7 @@ export default function JobDetail() {
       closeRef.current?.();
       closeRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, handleStage]);
 
   const currentStage = useMemo<StageName | null>(() => {

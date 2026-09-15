@@ -19,10 +19,16 @@ DEFAULT_ORIGINS = [
 
 
 def _allowed_origins() -> list[str]:
+    # "*" ile açık erişim: dağıtılan demo, kimlik doğrulama çerezi kullanmıyor,
+    # bu yüzden herkese açık kalması bir güvenlik riski oluşturmaz. Belirli bir
+    # kaynağa kısıtlamak isteyen kurulum, QB_ALLOWED_ORIGINS ortam değişkenini
+    # tanımlayıp bu fonksiyonu ona göre daraltabilir.
     extra = os.environ.get("QB_ALLOWED_ORIGINS", "")
-    origins = list(DEFAULT_ORIGINS)
-    origins.extend(o.strip() for o in extra.split(",") if o.strip())
-    return origins
+    if extra:
+        origins = list(DEFAULT_ORIGINS)
+        origins.extend(o.strip() for o in extra.split(",") if o.strip())
+        return origins
+    return ["*"]
 
 
 app = FastAPI(
@@ -38,7 +44,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

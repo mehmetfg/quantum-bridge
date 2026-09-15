@@ -59,16 +59,24 @@ export default function ProblemLab() {
     setStarting(true);
     setError(null);
     try {
-      const job = await api.startJob({
+      // Eşzamanlı (senkron) uç nokta kullanılır: iş tamamen bitene kadar
+      // beklenir ve tam sonuç tek seferde döner. Bu, sunucusuz (serverless)
+      // dağıtımda işlerin istekler arasında kalıcı olmamasından bağımsız
+      // çalışır. Aşamaların sırayla açılması istemci tarafında yapılır.
+      const job = await api.runJob({
         problem_id: selected.id,
         input,
         shots,
         backend_id: backendId,
         noise_level: noiseLevel,
         seed,
-        stage_delay_ms: demoPace ? 550 : 0,
+        // Sunucuda bekleme yapılmaz (istek tek seferde ve hızlıca biter);
+        // sunum hızı JobDetail ekranında istemci tarafında ayrıca uygulanır.
+        stage_delay_ms: 0,
       });
-      navigate(`/isler/${job.id}`);
+      navigate(`/isler/${job.id}`, {
+        state: { job, replayDelayMs: demoPace ? 450 : 0 },
+      });
     } catch (err) {
       setError((err as Error).message);
       setStarting(false);
